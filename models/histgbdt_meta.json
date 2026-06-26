@@ -1,0 +1,33 @@
+{
+  "model_type": "HistGradientBoostingClassifier",
+  "model_path": "models\\histgbdt.joblib",
+  "feature_order": [
+    "ipc",
+    "l2_miss_rate",
+    "l3_miss_rate",
+    "memory_bandwidth",
+    "cpu_usage_overall",
+    "cpu_temperature",
+    "cpu_power",
+    "cpu_frequency",
+    "ipc_change",
+    "ipc_avg_5",
+    "l3_miss_rate_avg_5",
+    "bw_util"
+  ],
+  "n_features": 12,
+  "classes": [
+    0,
+    1,
+    2
+  ],
+  "training_cv": {
+    "score": 0.9938637847228009,
+    "params": {
+      "max_depth": null,
+      "learning_rate": 0.05,
+      "max_leaf_nodes": 15
+    }
+  },
+  "scaler_stats_path": "dataset/scaler_stats.npz"
+}

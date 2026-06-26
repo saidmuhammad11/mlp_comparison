@@ -1,0 +1,9 @@
+Metric,Baseline (Medium),With HistGBDT,Improvement,Improvement %
+Avg CPU Power (W),49.782,43.287,-6.495,+13.0%
+Avg IPC,1.322,1.286,-0.036,-2.7%
+Avg CPU Usage (%),55.871,57.360,+1.489,-2.7%
+Avg L2 Miss Rate,0.103,0.098,-0.005,+4.8%
+Avg L3 Miss Rate,0.105,0.107,+0.002,-1.8%
+Avg Temp (°C),62.260,63.206,+0.947,-1.5%
+Avg Freq (GHz),3.215,2.432,-0.783,-24.3%
+Total Energy (J),9259.500,6103.500,-3156.000,+34.1%

@@ -1,0 +1,7 @@
+{
+  "datadir": "dataset_massive_w4_v2",
+  "outdir": "results_massive_w4_v2_unleashed",
+  "modeldir": "models_massive_w4_v2_unleashed",
+  "use_smote": false,
+  "histgbdt_balance": "sample_weight"
+}

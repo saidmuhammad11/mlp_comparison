@@ -1,320 +1,260 @@
-import argparse
+#!/usr/bin/env python3
+import os
 import time
-from pathlib import Path
-
+import json
+import argparse
 import numpy as np
 import pandas as pd
+import joblib
+from pathlib import Path
 
-from sklearn.metrics import accuracy_score, f1_score, balanced_accuracy_score, confusion_matrix
 from sklearn.linear_model import LogisticRegression
 from sklearn.svm import LinearSVC
-from sklearn.neighbors import KNeighborsClassifier, NearestNeighbors
+from sklearn.neighbors import KNeighborsClassifier
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.ensemble import RandomForestClassifier, HistGradientBoostingClassifier
+from sklearn.metrics import accuracy_score, f1_score, balanced_accuracy_score, precision_recall_fscore_support, confusion_matrix
+from sklearn.utils.class_weight import compute_sample_weight
 
-import torch
-import torch.nn as nn
-import torch.optim as optim
+try:
+    from imblearn.over_sampling import SMOTE
+    HAS_SMOTE = True
+except ImportError:
+    HAS_SMOTE = False
 
-CLASS_NAMES = ["Low", "Medium", "High"]
-
-
-def decision_stability(meta_test: pd.DataFrame, y_pred: np.ndarray):
-    df = meta_test.copy()
-    df["y_pred"] = y_pred
-
-    switch_counts = 0
-    trans_counts = 0
-    run_lengths = []
-
-    for _, g in df.groupby("source_file"):
-        yp = g["y_pred"].to_numpy()
-        if len(yp) <= 1:
-            continue
-        switch_counts += int(np.sum(yp[1:] != yp[:-1]))
-        trans_counts += (len(yp) - 1)
-
-        run = 1
-        for i in range(1, len(yp)):
-            if yp[i] == yp[i - 1]:
-                run += 1
-            else:
-                run_lengths.append(run)
-                run = 1
-        run_lengths.append(run)
-
-    switch_rate = (switch_counts / trans_counts) if trans_counts > 0 else 0.0
-    avg_run = float(np.mean(run_lengths)) if run_lengths else 0.0
-    return switch_rate, avg_run
-
-
-def latency_ms_per_sample(predict_fn, X: np.ndarray, repeats: int = 20, max_samples: int = 500) -> float:
-    if len(X) == 0:
-        return 0.0
-    Xs = X[: min(len(X), max_samples)]
-    t0 = time.perf_counter()
-    for _ in range(repeats):
-        _ = predict_fn(Xs)
-    t1 = time.perf_counter()
-    return (t1 - t0) * 1000.0 / (repeats * len(Xs))
-
-
-def smote_multiclass(X, y, k=5, seed=42):
-    """
-    Minimal multiclass SMOTE (train only), no imblearn dependency.
-    """
-    rng = np.random.RandomState(seed)
-    X = np.asarray(X, dtype=np.float32)
-    y = np.asarray(y, dtype=np.int64)
-
-    classes, counts = np.unique(y, return_counts=True)
-    if len(classes) < 2:
-        return X, y
-
-    max_count = int(counts.max())
-    X_out = [X]
-    y_out = [y]
-
-    for cls, cnt in zip(classes, counts):
-        cnt = int(cnt)
-        if cnt >= max_count:
-            continue
-        Xc = X[y == cls]
-        if len(Xc) < 2:
-            continue
-
-        k_eff = min(k, len(Xc) - 1)
-        if k_eff < 1:
-            continue
-
-        nnm = NearestNeighbors(n_neighbors=k_eff + 1)
-        nnm.fit(Xc)
-        neigh = nnm.kneighbors(Xc, return_distance=False)[:, 1:]  # drop self
-
-        n_gen = max_count - cnt
-        synth = np.empty((n_gen, X.shape[1]), dtype=np.float32)
-
-        for i in range(n_gen):
-            a = rng.randint(0, len(Xc))
-            b = neigh[a][rng.randint(0, k_eff)]
-            lam = rng.rand()
-            synth[i] = Xc[a] + lam * (Xc[b] - Xc[a])
-
-        X_out.append(synth)
-        y_out.append(np.full(n_gen, cls, dtype=np.int64))
-
-    return np.vstack(X_out), np.concatenate(y_out)
-
-
-def eval_model(name, model, X_test, y_test, meta_test, latency_repeats=20, latency_samples=500):
-    y_pred = model.predict(X_test)
-    acc = accuracy_score(y_test, y_pred)
-    f1m = f1_score(y_test, y_pred, average="macro")
-    bacc = balanced_accuracy_score(y_test, y_pred)
-    cm = confusion_matrix(y_test, y_pred, labels=[0, 1, 2])
-
-    swr, avg_run = decision_stability(meta_test, y_pred)
-    lat = latency_ms_per_sample(model.predict, X_test, repeats=latency_repeats, max_samples=latency_samples)
-
-    return {
-        "model": name,
-        "accuracy": acc,
-        "macro_f1": f1m,
-        "balanced_acc": bacc,
-        "switch_rate": swr,
-        "avg_run_length": avg_run,
-        "latency_ms_per_sample": lat,
-    }, cm
-
-
-class TorchMLP(nn.Module):
-    def __init__(self, in_dim=12, h1=64, h2=64, h3=32, out_dim=3, dropout=0.10):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(in_dim, h1),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(h1, h2),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(h2, h3),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(h3, out_dim),
-        )
-
-    def forward(self, x):
-        return self.net(x)
-
-
-class TorchWrapper:
-    def __init__(self, model: nn.Module, device="cpu"):
-        self.model = model.to(device)
-        self.device = device
-        self.model.eval()
-
-    def predict(self, X: np.ndarray):
-        with torch.no_grad():
-            x = torch.tensor(X, dtype=torch.float32, device=self.device)
-            logits = self.model(x)
-            return torch.argmax(logits, dim=1).cpu().numpy()
-
-
-def train_torch_mlp(X_train, y_train, X_val, y_val,
-                    seed=42, epochs=1500, lr=1e-3, dropout=0.10,
-                    batch_size=128, weight_decay=1e-4, quick=False):
-    torch.manual_seed(seed)
-    np.random.seed(seed)
-
-    device = "cpu"
-    mdl = TorchMLP(dropout=dropout).to(device)
-    opt = optim.Adam(mdl.parameters(), lr=lr, weight_decay=weight_decay)
-    loss_fn = nn.CrossEntropyLoss()
-
-    if quick:
-        epochs = min(epochs, 50)
-
-    Xtr = torch.tensor(X_train, dtype=torch.float32)
-    ytr = torch.tensor(y_train, dtype=torch.long)
-    Xv = torch.tensor(X_val, dtype=torch.float32, device=device)
-
-    ds = torch.utils.data.TensorDataset(Xtr, ytr)
-    dl = torch.utils.data.DataLoader(ds, batch_size=batch_size, shuffle=True, drop_last=False)
-
-    best_state = None
-    best_f1 = -1.0
-
-    for ep in range(1, epochs + 1):
-        mdl.train()
-        for xb, yb in dl:
-            xb = xb.to(device)
-            yb = yb.to(device)
-            opt.zero_grad()
-            loss = loss_fn(mdl(xb), yb)
-            loss.backward()
-            opt.step()
-
-        mdl.eval()
-        with torch.no_grad():
-            pv = torch.argmax(mdl(Xv), dim=1).cpu().numpy()
-        f1m = f1_score(y_val, pv, average="macro")
-
-        if f1m > best_f1:
-            best_f1 = f1m
-            best_state = {k: v.detach().cpu().clone() for k, v in mdl.state_dict().items()}
-
-        if ep in (1, epochs) or (ep % 100 == 0):
-            print(f"    [TorchMLP] epoch {ep}/{epochs} val_macroF1={f1m:.4f} best={best_f1:.4f}")
-
-    if best_state is not None:
-        mdl.load_state_dict(best_state)
-    mdl.eval()
-    return mdl
-
+def calculate_switch_metrics(y_pred):
+    """Calculates switch rate and average run length for sequence predictions."""
+    if len(y_pred) <= 1:
+        return 0.0, 1.0
+    switches = np.sum(y_pred[:-1] != y_pred[1:])
+    switch_rate = switches / (len(y_pred) - 1)
+    avg_run_length = len(y_pred) / (switches + 1) if switches > 0 else len(y_pred)
+    return switch_rate, avg_run_length
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--datadir", required=True)
-    ap.add_argument("--outdir", required=True)
-    ap.add_argument("--modeldir", required=True)
-    ap.add_argument("--quick", action="store_true")
-    ap.add_argument("--use_smote", action="store_true", help="Apply internal SMOTE to TRAIN only")
-    ap.add_argument("--seed", type=int, default=42)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--datadir", required=True, help="Path to built dataset directory")
+    parser.add_argument("--outdir", required=True, help="Directory to save CSV results")
+    parser.add_argument("--modeldir", required=True, help="Directory to save trained models")
+    parser.add_argument("--use_smote", action="store_true", help="Apply SMOTE to baseline models")
+    parser.add_argument("--histgbdt_balance", type=str, default="none", 
+                        choices=["none", "smote", "sample_weight", "class_weight"],
+                        help="Balancing strategy specifically for HistGBDT")
+    args = parser.parse_args()
 
-    ap.add_argument("--mlp_epochs", type=int, default=1500)
-    ap.add_argument("--mlp_lr", type=float, default=1e-3)
-    ap.add_argument("--mlp_dropout", type=float, default=0.10)
-    ap.add_argument("--mlp_batch", type=int, default=128)
-    ap.add_argument("--mlp_wd", type=float, default=1e-4)
-
-    ap.add_argument("--latency_samples", type=int, default=500)
-    ap.add_argument("--latency_repeats", type=int, default=None)
-    args = ap.parse_args()
+    # Setup directories
+    os.makedirs(args.outdir, exist_ok=True)
+    os.makedirs(args.modeldir, exist_ok=True)
 
     datadir = Path(args.datadir)
-    outdir = Path(args.outdir); outdir.mkdir(parents=True, exist_ok=True)
-    modeldir = Path(args.modeldir); modeldir.mkdir(parents=True, exist_ok=True)
-
-    X_train = np.load(datadir / "X_train.npy")
+    
+    # Load data
+    print("[INFO] Loading dataset...")
+    X_train = np.load(datadir / "X_train.npy").astype(float)
+    X_test = np.load(datadir / "X_test.npy").astype(float)
     y_train = np.load(datadir / "y_train.npy")
-    X_test  = np.load(datadir / "X_test.npy")
-    y_test  = np.load(datadir / "y_test.npy")
-    meta_test = pd.read_csv(datadir / "meta_test.csv")
+    y_test = np.load(datadir / "y_test.npy")
+    
+    # Load feature names if available
+    feature_names = []
+    if (datadir / "feature_names.json").exists():
+        with open(datadir / "feature_names.json", "r") as f:
+            feature_names = json.load(f)
+    
+    print(f"  X_train: {X_train.shape}")
+    print(f"  X_test : {X_test.shape}")
+    if feature_names:
+        print(f"  feature names: {feature_names}")
 
-    rng = np.random.RandomState(args.seed)
-    idx = np.arange(len(X_train))
-    rng.shuffle(idx)
-    cut = int(0.85 * len(idx))
-    tr_idx, va_idx = idx[:cut], idx[cut:]
-    Xtr, ytr = X_train[tr_idx], y_train[tr_idx]
-    Xva, yva = X_train[va_idx], y_train[va_idx]
+    # Map labels to numeric if they are strings
+    classes = ["Low", "Medium", "High"]
+    if y_train.dtype.kind in {'U', 'S', 'O'}:
+        label_map = {"Low": 0, "Medium": 1, "High": 2}
+        y_train = np.array([label_map[y] for y in y_train])
+        y_test = np.array([label_map[y] for y in y_test])
 
+    # Print distribution
+    unique_tr, counts_tr = np.unique(y_train, return_counts=True)
+    unique_te, counts_te = np.unique(y_test, return_counts=True)
+    
+    tr_dist = ", ".join([f"{classes[k]}={v} ({v/len(y_train)*100:.1f}%)" for k, v in zip(unique_tr, counts_tr)])
+    te_dist = ", ".join([f"{classes[k]}={v} ({v/len(y_test)*100:.1f}%)" for k, v in zip(unique_te, counts_te)])
+    print("[INFO] Class distribution")
+    print(f"  train: {tr_dist}")
+    print(f"  test: {te_dist}")
+
+    # Baseline SMOTE
+    X_fit, y_fit = X_train, y_train
     if args.use_smote:
-        X_train_fit, y_train_fit = smote_multiclass(X_train, y_train, seed=args.seed)
-        Xtr_fit, ytr_fit = smote_multiclass(Xtr, ytr, seed=args.seed)
-        cw_bal = None
-        cw_bal_sub = None
-    else:
-        X_train_fit, y_train_fit = X_train, y_train
-        Xtr_fit, ytr_fit = Xtr, ytr
-        cw_bal = "balanced"
-        cw_bal_sub = "balanced_subsample"
+        if not HAS_SMOTE:
+            print("[WARN] imblearn not installed. Cannot use SMOTE.")
+        else:
+            print("[INFO] Applying SMOTE to baseline models...")
+            smote = SMOTE(random_state=42)
+            X_fit, y_fit = smote.fit_resample(X_train, y_train)
 
-    models = [
-        ("LogReg", LogisticRegression(max_iter=2500, class_weight=cw_bal)),
-        ("LinearSVM", LinearSVC(class_weight=cw_bal)),
-        ("kNN", KNeighborsClassifier(n_neighbors=11)),
-        ("DecisionTree", DecisionTreeClassifier(max_depth=10, random_state=args.seed, class_weight=cw_bal)),
-        ("RandomForest", RandomForestClassifier(
-            n_estimators=200 if not args.quick else 80,
-            random_state=args.seed,
-            n_jobs=-1,
-            class_weight=cw_bal_sub
-        )),
-        ("HistGBDT", HistGradientBoostingClassifier(
-            learning_rate=0.1,
-            max_depth=6,
-            max_iter=250 if not args.quick else 120,
-            random_state=args.seed
-        )),
-    ]
+    # Define baseline models
+    models = {
+        "LogReg": LogisticRegression(max_iter=1000, random_state=42, class_weight="balanced"),
+        "LinearSVM": LinearSVC(max_iter=2000, random_state=42, class_weight="balanced", dual=False),
+        "kNN": KNeighborsClassifier(n_neighbors=5, weights="distance"),
+        "DecisionTree": DecisionTreeClassifier(random_state=42, class_weight="balanced"),
+        "RandomForest": RandomForestClassifier(n_estimators=100, random_state=42, class_weight="balanced")
+    }
 
-    latency_repeats = args.latency_repeats if args.latency_repeats is not None else (8 if args.quick else 20)
     results = []
-    cms = {}
+    per_class_metrics = []
+    test_predictions = pd.DataFrame()
 
-    for name, mdl in models:
-        mdl.fit(X_train_fit, y_train_fit)
-        r, cm = eval_model(name, mdl, X_test, y_test, meta_test,
-                           latency_repeats=latency_repeats, latency_samples=args.latency_samples)
-        results.append(r)
-        cms[name] = cm
-        print(f"[OK] {name}: acc={r['accuracy']:.3f} macroF1={r['macro_f1']:.3f} switch={r['switch_rate']:.3f} lat(ms)={r['latency_ms_per_sample']:.4f}")
+    # Train and evaluate baselines
+    for name, mdl in models.items():
+        print(f"[INFO] Training {name}...")
+        
+        # Training
+        mdl.fit(X_fit, y_fit)
+        
+        # Latency check (100 samples)
+        sample_size = min(100, len(X_test))
+        start_time = time.perf_counter()
+        mdl.predict(X_test[:sample_size])
+        end_time = time.perf_counter()
+        lat_ms = ((end_time - start_time) / sample_size) * 1000
 
-    print(f"[INFO] Training TorchMLP epochs={args.mlp_epochs} batch={args.mlp_batch} lr={args.mlp_lr} dropout={args.mlp_dropout} wd={args.mlp_wd}")
-    torch_mlp = train_torch_mlp(
-        Xtr_fit, ytr_fit, Xva, yva,
-        seed=args.seed, epochs=args.mlp_epochs, lr=args.mlp_lr, dropout=args.mlp_dropout,
-        batch_size=args.mlp_batch, weight_decay=args.mlp_wd, quick=args.quick
+        # Full Test Predictions
+        y_pred = mdl.predict(X_test)
+        test_predictions[name] = y_pred
+
+        # Metrics
+        acc = accuracy_score(y_test, y_pred)
+        mac_f1 = f1_score(y_test, y_pred, average='macro')
+        bal_acc = balanced_accuracy_score(y_test, y_pred)
+        sw_rate, avg_run = calculate_switch_metrics(y_pred)
+        
+        print(f"[OK] {name}: acc={acc:.3f} macroF1={mac_f1:.3f} balancedAcc={bal_acc:.3f} switch={sw_rate:.3f} avgRun={avg_run:.3f} lat(ms)={lat_ms:.4f}")
+
+        results.append({
+            "model": name,
+            "accuracy": acc,
+            "macro_f1": mac_f1,
+            "balanced_acc": bal_acc,
+            "switch_rate": sw_rate,
+            "avg_run_length": avg_run,
+            "latency_ms_per_sample": lat_ms
+        })
+
+        # Per Class Metrics
+        prec, rec, f1_val, supp = precision_recall_fscore_support(y_test, y_pred, labels=[0, 1, 2])
+        for i, class_name in enumerate(classes):
+            print(f"      {class_name}: P={prec[i]:.3f} R={rec[i]:.3f} F1={f1_val[i]:.3f} N={supp[i]}")
+            per_class_metrics.append({
+                "model": name,
+                "class": class_name,
+                "precision": prec[i],
+                "recall": rec[i],
+                "f1": f1_val[i],
+                "support": supp[i]
+            })
+
+    # ==========================================
+    # HISTGBDT - THE UNLEASHED MODEL
+    # ==========================================
+    print("[INFO] Training HistGBDT...")
+    print(f"[INFO] HistGBDT balancing: {args.histgbdt_balance} (Unleashed Hyperparameters)")
+
+    # 1. Initialize Unleashed Parameters
+    histgbdt = HistGradientBoostingClassifier(
+        max_iter=300,          # More trees to map complex boundaries
+        learning_rate=0.05,    # Slower, more careful learning
+        min_samples_leaf=2,    # Allowed to isolate sharp, transient CPU spikes
+        l2_regularization=0.0, # Removed the mathematical straitjacket
+        random_state=42
     )
-    torch_path = modeldir / "torch_mlp.pth"
-    torch.save(torch_mlp.state_dict(), torch_path)
-    wrapper = TorchWrapper(torch_mlp, device="cpu")
 
-    r, cm = eval_model("TorchMLP", wrapper, X_test, y_test, meta_test,
-                       latency_repeats=latency_repeats, latency_samples=args.latency_samples)
-    results.append(r)
-    cms["TorchMLP"] = cm
-    print(f"[OK] TorchMLP: acc={r['accuracy']:.3f} macroF1={r['macro_f1']:.3f} switch={r['switch_rate']:.3f} lat(ms)={r['latency_ms_per_sample']:.4f}")
+    # 2. Data prep based on strategy
+    X_hgbdt, y_hgbdt = X_train, y_train
+    sample_weights = None
 
-    df = pd.DataFrame(results).sort_values(["macro_f1", "balanced_acc"], ascending=False)
-    df.to_csv(outdir / "model_comparison.csv", index=False)
+    if args.histgbdt_balance == "smote" and HAS_SMOTE:
+        smote = SMOTE(random_state=42)
+        X_hgbdt, y_hgbdt = smote.fit_resample(X_train, y_train)
+    elif args.histgbdt_balance == "sample_weight":
+        sample_weights = compute_sample_weight(class_weight='balanced', y=y_train)
 
-    for name, cm in cms.items():
-        pd.DataFrame(cm, index=CLASS_NAMES, columns=CLASS_NAMES).to_csv(outdir / f"confusion_{name}.csv")
+    # 3. Fit Model
+    if sample_weights is not None:
+        histgbdt.fit(X_hgbdt, y_hgbdt, sample_weight=sample_weights)
+    else:
+        histgbdt.fit(X_hgbdt, y_hgbdt)
 
-    print(f"[DONE] Wrote:\n  {outdir / 'model_comparison.csv'}\n  confusion_*.csv\n  saved model: {torch_path}")
+    # 4. Latency Check
+    sample_size = min(100, len(X_test))
+    start_time = time.perf_counter()
+    histgbdt.predict(X_test[:sample_size])
+    end_time = time.perf_counter()
+    lat_ms = ((end_time - start_time) / sample_size) * 1000
 
+    # 5. Full Predictions
+    y_pred = histgbdt.predict(X_test)
+    test_predictions["HistGBDT"] = y_pred
+
+    # 6. Metrics
+    acc = accuracy_score(y_test, y_pred)
+    mac_f1 = f1_score(y_test, y_pred, average='macro')
+    bal_acc = balanced_accuracy_score(y_test, y_pred)
+    sw_rate, avg_run = calculate_switch_metrics(y_pred)
+    
+    print(f"[OK] HistGBDT: acc={acc:.3f} macroF1={mac_f1:.3f} balancedAcc={bal_acc:.3f} switch={sw_rate:.3f} avgRun={avg_run:.3f} lat(ms)={lat_ms:.4f}")
+
+    results.append({
+        "model": "HistGBDT",
+        "accuracy": acc,
+        "macro_f1": mac_f1,
+        "balanced_acc": bal_acc,
+        "switch_rate": sw_rate,
+        "avg_run_length": avg_run,
+        "latency_ms_per_sample": lat_ms
+    })
+
+    prec, rec, f1_val, supp = precision_recall_fscore_support(y_test, y_pred, labels=[0, 1, 2])
+    for i, class_name in enumerate(classes):
+        print(f"      {class_name}: P={prec[i]:.3f} R={rec[i]:.3f} F1={f1_val[i]:.3f} N={supp[i]}")
+        per_class_metrics.append({
+            "model": "HistGBDT",
+            "class": class_name,
+            "precision": prec[i],
+            "recall": rec[i],
+            "f1": f1_val[i],
+            "support": supp[i]
+        })
+
+    # Save models and configurations
+    joblib.dump(histgbdt, Path(args.modeldir) / "histgbdt.joblib")
+    print(f"[OK] Saved HistGBDT model to {Path(args.modeldir) / 'histgbdt.joblib'}")
+
+    if feature_names:
+        with open(Path(args.modeldir) / "feature_names.json", "w") as f:
+            json.dump(feature_names, f)
+        with open(Path(args.outdir) / "feature_names.json", "w") as f:
+            json.dump(feature_names, f)
+
+    run_config = vars(args)
+    with open(Path(args.outdir) / "run_config.json", "w") as f:
+        json.dump(run_config, f, indent=2)
+    with open(Path(args.modeldir) / "run_config.json", "w") as f:
+        json.dump(run_config, f, indent=2)
+
+    # Save CSVs
+    pd.DataFrame(results).to_csv(Path(args.outdir) / "model_comparison.csv", index=False)
+    pd.DataFrame(per_class_metrics).to_csv(Path(args.outdir) / "per_class_metrics.csv", index=False)
+    test_predictions.to_csv(Path(args.outdir) / "test_predictions.csv", index=False)
+
+    # Save Confusion Matrices
+    for name in test_predictions.columns:
+        cm = confusion_matrix(y_test, test_predictions[name], labels=[0, 1, 2])
+        cm_df = pd.DataFrame(cm, index=classes, columns=classes)
+        cm_df.to_csv(Path(args.outdir) / f"confusion_{name}.csv")
+
+    print("[DONE] Wrote comparison files and saved models.")
 
 if __name__ == "__main__":
     main()

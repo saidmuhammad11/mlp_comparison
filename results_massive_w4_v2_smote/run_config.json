@@ -1,0 +1,20 @@
+{
+  "n_features": 11,
+  "feature_names": [
+    "ipc",
+    "l2_miss_rate",
+    "l3_miss_rate",
+    "cpu_usage_overall",
+    "cpu_temperature",
+    "cpu_power",
+    "cpu_frequency",
+    "ipc_change",
+    "ipc_avg_8",
+    "l3_miss_rate_avg_8",
+    "bw_util"
+  ],
+  "quick": false,
+  "use_smote": false,
+  "histgbdt_balance": "smote",
+  "seed": 42
+}

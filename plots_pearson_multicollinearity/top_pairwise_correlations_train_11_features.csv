@@ -1,0 +1,5 @@
+feature_1,feature_2,feature_1_display,feature_2_display,pearson_r,abs_pearson_r
+ipc,ipc_change,IPC,IPC change,0.7070917716507618,0.7070917716507618
+l3_miss_rate,l3_miss_rate_avg_8,L3 miss rate,Rolling L3 miss rate,0.5144251482166396,0.5144251482166396
+ipc,ipc_avg_8,IPC,Rolling IPC,0.5072858946847966,0.5072858946847966
+cpu_power,cpu_frequency,CPU power,CPU frequency,0.2953497991663198,0.2953497991663198

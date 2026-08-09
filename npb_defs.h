@@ -1,0 +1,10 @@
+
+#define NPBVERSION "3.0"
+#define COMPILETIME "19 Jul 2026"
+#define CS1 "gcc"
+#define CS2 "gcc"
+#define CS3 "-O3"
+#define CS4 "-I"
+#define CS5 "-I"
+#define CS6 "-I"
+#define CS7 "rand"

@@ -1,0 +1,14 @@
+.SUFFIXES: .c .obj
+
+.c.obj:
+	$(CC) $(CFLAGS) -c $<
+
+CC = cl -Za -W3
+CFLAGS = -nologo -O2x  /G6
+
+OBJS = FFT.obj kernel.obj Stopwatch.obj Random.obj SOR.obj SparseCompRow.obj \
+		array.obj MonteCarlo.obj LU.obj
+
+scimark2.exe : scimark2.obj $(OBJS)
+	$(CC) $(CFLAGS)	scimark2.obj $(OBJS)
+

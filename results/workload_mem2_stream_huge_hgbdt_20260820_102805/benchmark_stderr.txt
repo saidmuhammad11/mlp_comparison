@@ -1,0 +1,12 @@
+Traceback (most recent call last):
+  File "C:\Users\saidm\Desktop\mlp_comparison\workload_mem2_stream_huge.py", line 2, in <module>
+    subprocess.run([r"C:/Users/saidm/OneDrive/Desktop/Programming/Hardware_test/stream_official/stream_huge.exe"])
+  File "C:\Users\saidm\AppData\Local\Programs\Python\Python312\Lib\subprocess.py", line 548, in run
+    with Popen(*popenargs, **kwargs) as process:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\saidm\AppData\Local\Programs\Python\Python312\Lib\subprocess.py", line 1026, in __init__
+    self._execute_child(args, executable, preexec_fn, close_fds,
+  File "C:\Users\saidm\AppData\Local\Programs\Python\Python312\Lib\subprocess.py", line 1538, in _execute_child
+    hp, ht, pid, tid = _winapi.CreateProcess(executable, args,
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [WinError 2] The system cannot find the file specified

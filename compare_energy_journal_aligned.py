@@ -31,12 +31,12 @@ import pandas as pd
 
 
 # ============================ CONFIGURATION ============================
-BASELINE_FILE = 'histgbdtdisable_benchmark_mem2_streamhuge.json'
-PROPOSED_FILE = 'histgbdtenable_benchmark_mem2_streamhuge.json' 
+BASELINE_FILE = 'HistGBDTdisable_mixed_new2.json'
+PROPOSED_FILE = 'HistGBDTenable_mixed_new2.json' 
 
 # WORKLOAD_NAME = "CPU_Intensive"
-WORKLOAD_NAME = "MEMORY_Intensive"
-# WORKLOAD_NAME = "Mixed"
+# WORKLOAD_NAME = "CPU_Intensive"
+WORKLOAD_NAME = "Mixed"
 
 BASELINE_LABEL = "Default Windows Medium"
 PROPOSED_LABEL = "HistGBDT-PMS"

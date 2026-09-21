@@ -31,12 +31,12 @@ import pandas as pd
 
 
 # ============================ CONFIGURATION ============================
-BASELINE_FILE = 'HistGBDTdisable_mixed_new2.json'
-PROPOSED_FILE = 'HistGBDTenable_mixed_new2.json' 
+BASELINE_FILE = 'HistGBDTdisable_cpuintensive_new2.json'
+PROPOSED_FILE = 'HistGBDTenable_cpuintensive_new2.json' 
 
+WORKLOAD_NAME = "CPU_Intensive"
 # WORKLOAD_NAME = "CPU_Intensive"
-# WORKLOAD_NAME = "CPU_Intensive"
-WORKLOAD_NAME = "Mixed"
+# WORKLOAD_NAME = "Mixed"
 
 BASELINE_LABEL = "Default Windows Medium"
 PROPOSED_LABEL = "HistGBDT-PMS"

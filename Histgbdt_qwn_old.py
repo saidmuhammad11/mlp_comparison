@@ -9,6 +9,8 @@ Features:
   1. Energy Save Mode (Caps "High" state for CPU-bound tasks).
   2. Memory-Bound Protection (Blocks "High" state for memory-bound tasks).
 - Supports "Run to Completion" and "Fixed Duration" modes.
+- Fixed bandwidth reference (25000 MB/s) to match training data.
+- Enabled hysteresis to reduce state switching.
 """
 import os
 import json
@@ -34,7 +36,7 @@ STOP_REQUESTED = False
 def handle_ctrl_c(sig, frame):
     global STOP_REQUESTED
     STOP_REQUESTED = True
-    print("\n️ Ctrl+C detected — requesting shutdown...")
+    print("\n⚠️ Ctrl+C detected — requesting shutdown...")
 
 signal.signal(signal.SIGINT, handle_ctrl_c)
 
@@ -46,6 +48,7 @@ LOG_FILE = str((ROOT / f"monitoring_log_HGBDT_{datetime.now().strftime('%Y%m%d_%
 
 PCM_PATHS = [
     str((ROOT / "pcm.exe").resolve()),
+    r"C:\Users\saidm\OneDrive\Desktop\Programming\pcm\build\bin\Release\pcm.exe",
     r"C:\Users\saidm\Desktop\Programming\pcm\build\bin\Release\pcm.exe",
     r"C:\Users\saidm\pcm\build\bin\Release\pcm.exe",
     "pcm.exe"
@@ -53,12 +56,14 @@ PCM_PATHS = [
 
 POWER_GADGET_PATHS = [
     str((ROOT / "pcm-power.exe").resolve()),
+    r"C:\Users\saidm\OneDrive\Desktop\Programming\pcm\build\bin\Release\pcm-power.exe",
     r"C:\Users\saidm\Desktop\Programming\pcm\build\bin\Release\pcm-power.exe",
     r"C:\Users\saidm\pcm\build\bin\Release\pcm-power.exe",
     "pcm-power.exe"
 ]
 
 DURATION_OPTIONS = [100, 200, 300]
+
 DEFAULT_MODEL_FILE  = str((ROOT / "models" / "histgbdt.joblib").resolve())
 DEFAULT_SCALER_FILE = str((ROOT / "dataset" / "scaler_stats.npz").resolve())
 
@@ -69,21 +74,19 @@ BW_REF = 25000.0
 POWER_PLANS = {
     "High":   "27ad8305-4092-41f2-a01b-5a6003fb5077",
     "Medium": "381b4222-f694-41f0-9685-ff5bb260df2e",
-    "Low":    "a1841308-3541-4fab-bc81-f71556f20b4a"
+    "Low":    "b2524225-86dc-424d-ba5b-e78d683c5d3a"  # Custom GUID
 }
 
 # Control mode
-USE_HGBDT_DVFS = True  # Set to False to test baseline
+USE_HGBDT_DVFS = True
 
 # Hysteresis settings
 ENABLE_PROBA_HYSTERESIS = True
 PROBA_MARGIN = 0.20
 
 # --- UNIFIED POLICY FLAGS ---
-# Set to True to reduce aggressiveness and save energy for CPU-bound tasks
 ENERGY_SAVE_MODE = True 
-# Only allow "High" state if the 5-sample rolling average IPC is above this
-IPC_PERFORMANCE_FLOOR = 1.5 
+IPC_PERFORMANCE_FLOOR = 1.0
 
 # =====================================================
 def _best_effort_find_joblib(models_dir: Path) -> str | None:
@@ -122,12 +125,15 @@ class HistGBDTModel:
                     self.scaler_mean = scaler_stats["mean"].astype(np.float32)
                 elif "mean_" in scaler_stats:
                     self.scaler_mean = scaler_stats["mean_"].astype(np.float32)
+                    
                 if "scale" in scaler_stats:
                     self.scaler_scale = scaler_stats["scale"].astype(np.float32)
                 elif "scale_" in scaler_stats:
                     self.scaler_scale = scaler_stats["scale_"].astype(np.float32)
+                    
                 if self.scaler_mean is None or self.scaler_scale is None:
                     raise KeyError(f"Scaler keys not found. Keys present: {list(scaler_stats.keys())}")
+                    
                 self.scaler_scale = np.where(self.scaler_scale == 0, 1.0, self.scaler_scale)
                 print(f"✅ Loaded scaler stats from: {scaler_path}")
             except Exception as e:
@@ -145,10 +151,12 @@ class HistGBDTModel:
         if classes is None:
             self.class_to_level = {0: "Low", 1: "Medium", 2: "High"}
             return
+            
         classes_list = list(classes)
         if all(isinstance(c, str) for c in classes_list):
             self.class_to_level = {c: c for c in classes_list}
             return
+            
         try:
             cls_int = [int(c) for c in classes_list]
             if set(cls_int) == {0, 1, 2}:
@@ -162,9 +170,11 @@ class HistGBDTModel:
 
     def predict_level(self, features_dict):
         x = np.array([float(features_dict.get(k, 0.0)) for k in self.FEATURE_ORDER], dtype=np.float32)
+        
         if self.scaler_mean is not None and self.scaler_scale is not None:
             if x.shape[0] == self.scaler_mean.shape[0]:
                 x = (x - self.scaler_mean) / self.scaler_scale
+                
         X = x.reshape(1, -1)
         
         if ENABLE_PROBA_HYSTERESIS and hasattr(self.model, "predict_proba"):
@@ -173,9 +183,12 @@ class HistGBDTModel:
                 sorted_idx = np.argsort(proba)[::-1]
                 top1 = sorted_idx[0]
                 margin = float(proba[sorted_idx[0]] - proba[sorted_idx[1]])
+                
                 new_level = self.class_to_level.get(int(top1) if not isinstance(top1, str) else top1, "Medium")
+                
                 if new_level != self.last_level and margin < PROBA_MARGIN:
                     return self.last_level
+                    
                 self.last_level = new_level
                 return new_level
             except Exception:
@@ -186,6 +199,7 @@ class HistGBDTModel:
             cls_key = int(cls)
         except Exception:
             cls_key = cls
+            
         level = self.class_to_level.get(cls_key, "Medium")
         self.last_level = level
         return level
@@ -198,9 +212,11 @@ class HistGBDTDVFSController:
         self.running = True
         self.data_buffer = []
         self.model = model
-        self.workload_process = None
+        self.workload_process = None 
+        
         self.pcm_path = self.find_tool(PCM_PATHS)
         self.power_gadget_path = self.find_tool(POWER_GADGET_PATHS)
+        
         self.fig, self.axs = plt.subplots(4, 2, figsize=(16, 12))
         self.fig.suptitle("HistGBDT-Driven DVFS Monitoring", fontsize=14, fontweight='bold')
         self.POWER_PLANS = POWER_PLANS.copy()
@@ -231,12 +247,19 @@ class HistGBDTDVFSController:
             'memory_bandwidth': np.random.uniform(10000, 25000),
         }
 
+    def simulate_power_data(self):
+        return {
+            'cpu_power': np.random.uniform(40, 60),
+            'gpu_power': np.random.uniform(5, 20),
+            'cpu_temperature': np.random.uniform(50, 75),
+            'cpu_frequency': np.random.uniform(2800, 3600)
+        }
+
     def read_pcm_data(self):
         if not self.pcm_path:
             print("❌ PCM executable not found.")
             return self.simulate_pcm_data()
         try:
-            # CRITICAL FIX: Run PCM from its own folder so it finds the driver
             pcm_dir = os.path.dirname(self.pcm_path)
             result = subprocess.run(
                 [self.pcm_path, "1", "-nc", "-ns", "-i=1", "-r"],
@@ -277,13 +300,11 @@ class HistGBDTDVFSController:
             l2_hits = int((l2_misses / (1.0 - l2_hit_ratio)) * l2_hit_ratio) if l2_hit_ratio < 1.0 else 100000
             l3_hits = int((l3_misses / (1.0 - l3_hit_ratio)) * l3_hit_ratio) if l3_hit_ratio < 1.0 else 100000
             
-            # Extract real power from SYS energy (Joules per 1-second interval = Watts)
             power = 0.0
             energy_match = re.search(r"SYS energy:\s*([\d.]+)\s*J", result.stdout)
             if energy_match:
                 power = float(energy_match.group(1))
             
-            # Estimate memory bandwidth from L3 misses
             bw_mb_s = (l3_misses * 64) / (1024 * 1024)
             
             return {
@@ -301,7 +322,6 @@ class HistGBDTDVFSController:
             return self.simulate_pcm_data()
 
     def read_power_gadget_data(self):
-        # We get power directly from pcm.exe now.
         return {
             'cpu_power': 0.0,
             'gpu_power': 0.0,
@@ -346,15 +366,10 @@ class HistGBDTDVFSController:
         if USE_HGBDT_DVFS:
             level = self.model.predict_level(data)
             
-            # POLICY OVERRIDE 1: General Energy Save (CPU intensive Protection)
             if ENERGY_SAVE_MODE:
                 if level == "High" and data.get('ipc_avg_5', 0) > IPC_PERFORMANCE_FLOOR:
                     level = "Medium"
                     
-            # POLICY OVERRIDE 2: Memory Bound Protection (Highest Priority)
-            # If L3 miss rate is high (>40%) and IPC is low (<1.2), the workload 
-            # is memory bound. Even "Medium" allows turbo boosting to 2.2+ GHz, 
-            # which wastes 15 to 16W for no performance gain. Force "Low".
             if data.get('l3_miss_rate', 0) > 0.40 and data.get('ipc', 0) < 1.2:
                 level = "Low"
                 
@@ -369,10 +384,10 @@ class HistGBDTDVFSController:
 
     def start_workload(self, script_name, num_cores):
         if USE_HGBDT_DVFS:
-            print(f" HistGBDT-based DVFS active for {script_name}")
+            print(f"💡 HistGBDT-based DVFS active for {script_name}")
         else:
             print(f"💡 Baseline fixed-Medium mode for {script_name}")
-        
+            
         try:
             print(f"🚀 Starting {script_name}...")
             
@@ -411,12 +426,15 @@ class HistGBDTDVFSController:
         print(f"📊 Log: {LOG_FILE}")
         print(f"🔧 Mode: {'Run to Completion' if run_to_completion else f'Fixed Duration ({duration}s)'}")
         print("=" * 80)
+        
         self.set_power_plan("Medium")
         start_time = time.time()
+        tail_time = 10 
         
         with open(LOG_FILE, 'w') as f:
             iteration = 0
             workload_finished = False
+            finish_time = None
             
             while self.running and not STOP_REQUESTED:
                 try:
@@ -431,16 +449,17 @@ class HistGBDTDVFSController:
                               f"Level: {data['dvfs_level']:6} | IPC: {data['ipc']:4.2f} | "
                               f"Power: {data['cpu_power']:5.1f}W | Temp: {data['cpu_temperature']:4.1f}°C")
                     
-                    # Logic for Run to Completion
                     if run_to_completion:
                         if self.workload_process and self.workload_process.poll() is not None:
                             if not workload_finished:
                                 print("✅ Workload process finished.")
                                 workload_finished = True
-                            print("✅ Workload finished. Stopping monitor immediately.")
+                                finish_time = time.time()
+                        
+                        if workload_finished and (time.time() - finish_time > tail_time):
+                            print("☑️ Tail logging complete. Stopping monitor.")
                             break
                     else:
-                        # Logic for Fixed Duration
                         if (time.time() - start_time >= duration):
                             break
                             

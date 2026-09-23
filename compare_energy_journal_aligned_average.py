@@ -30,19 +30,19 @@ import pandas as pd
 # ============================ CONFIGURATION ============================
 # Provide the list of JSON logs for all runs. The script will average them.
 BASELINE_FILES = [
-    'HistGBDTdisable_mixed_new1_low.json',
-    'HistGBDTdisable_mixed_new2_low.json',
-    'HistGBDTdisable_mixed_new3_low.json',
-    'HistGBDTdisable_mixed_new4_low.json',
-    'HistGBDTdisable_mixed_new5_low.json',
+    './results\workload_mem2_stream_huge_medium_run1\monitoring.jsonl',
+    './results\workload_mem2_stream_huge_medium_run2\monitoring.jsonl',
+    './results\workload_mem2_stream_huge_medium_run3\monitoring.jsonl',
+    './results\workload_mem2_stream_huge_medium_run4\monitoring.jsonl',
+    './results\workload_mem2_stream_huge_medium_run5\monitoring.jsonl',
 ]
 
 PROPOSED_FILES = [
-    'HistGBDTenable_mixed_new1.json',
-    'HistGBDTenable_mixed_new2.json',
-    'HistGBDTenable_mixed_new3.json',
-    'HistGBDTenable_mixed_new4.json',
-    'HistGBDTenable_mixed_new5.json',
+    './results/workload_mem2_stream_huge_hgbdt_run1_20260922_081935/monitoring.jsonl',
+    './results/workload_mem2_stream_huge_hgbdt_run2_20260922_082657/monitoring.jsonl',
+    './results/workload_mem2_stream_huge_hgbdt_run3_20260922_083433/monitoring.jsonl',
+    './results/workload_mem2_stream_huge_hgbdt_run4_20260922_084156/monitoring.jsonl',
+    './results/workload_mem2_stream_huge_hgbdt_run5_20260922_084926/monitoring.jsonl',
 ]
 
 WORKLOAD_NAME = "Mixed workload"

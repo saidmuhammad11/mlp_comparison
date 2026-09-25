@@ -12,7 +12,7 @@ upgraded to support N-run averaging for Task-to-Completion metrics:
 5. Absolute traces, baseline-referenced deltas, table means, percentage
    changes, cache summaries, box plots, and integrated energy values use the 
    averaged aligned arrays.
-6. Task-to-Completion metrics (EDP, Total Instructions) are appended to CSV.
+6. Task-to-Completion metrics (EDP, ED^2P, Total Instructions, Total Memory) are appended to CSV.
 """
 
 from __future__ import annotations
@@ -30,19 +30,19 @@ import pandas as pd
 # ============================ CONFIGURATION ============================
 # Provide the list of JSON logs for all runs. The script will average them.
 BASELINE_FILES = [
-    './results\workload_mem2_stream_huge_medium_run1\monitoring.jsonl',
-    './results\workload_mem2_stream_huge_medium_run2\monitoring.jsonl',
-    './results\workload_mem2_stream_huge_medium_run3\monitoring.jsonl',
-    './results\workload_mem2_stream_huge_medium_run4\monitoring.jsonl',
-    './results\workload_mem2_stream_huge_medium_run5\monitoring.jsonl',
+    './results/workload_mixed1_bursty_lu_low_run1_20260924_181126/monitoring.jsonl',
+    './results/workload_mixed1_bursty_lu_low_run2_20260924_181819/monitoring.jsonl',
+    './results/workload_mixed1_bursty_lu_low_run3_20260924_182509/monitoring.jsonl',
+    './results/workload_mixed1_bursty_lu_low_run4_20260924_183204/monitoring.jsonl',
+    './results/workload_mixed1_bursty_lu_low_run5_20260924_183855/monitoring.jsonl',
 ]
 
 PROPOSED_FILES = [
-    './results/workload_mem2_stream_huge_hgbdt_run1_20260922_081935/monitoring.jsonl',
-    './results/workload_mem2_stream_huge_hgbdt_run2_20260922_082657/monitoring.jsonl',
-    './results/workload_mem2_stream_huge_hgbdt_run3_20260922_083433/monitoring.jsonl',
-    './results/workload_mem2_stream_huge_hgbdt_run4_20260922_084156/monitoring.jsonl',
-    './results/workload_mem2_stream_huge_hgbdt_run5_20260922_084926/monitoring.jsonl',
+    './results/workload_mixed1_bursty_lu_hgbdt_run1_20260924_092356/monitoring.jsonl',
+    './results/workload_mixed1_bursty_lu_hgbdt_run2_20260924_093003/monitoring.jsonl',
+    './results/workload_mixed1_bursty_lu_hgbdt_run3_20260924_093706/monitoring.jsonl',
+    './results/workload_mixed1_bursty_lu_hgbdt_run4_20260924_094405/monitoring.jsonl',
+    './results/workload_mixed1_bursty_lu_hgbdt_run5_20260924_095108/monitoring.jsonl',
 ]
 
 WORKLOAD_NAME = "Mixed workload"
@@ -111,7 +111,7 @@ STATE_STYLES = {
     "Low": {"color": "#4C78A8", "hatch": "///"},
     "Medium": {"color": "#F2A541", "hatch": "xx"},
     "High": {"color": "#59A14F", "hatch": "..."},
-    "Fixed": {"color": "#9D9D9D", "hatch": "\\\\"},
+    "Fixed": {"color": "#9D9D9D", "hatch": "////"},
 }
 
 CACHE_STYLES = {
@@ -311,9 +311,6 @@ def interpolate_numeric_metric(
             f"analysis requires {ANALYSIS_DURATION_S:.2f} s."
         )
 
-    # numpy.interp performs one-dimensional linear interpolation. Outside the
-    # measured domain it holds the endpoint value. Strict duration checks above
-    # limit that endpoint hold to a small, controlled interval.
     aligned = np.interp(
         time_grid_s,
         sample_time_s,
@@ -787,7 +784,6 @@ class JournalComparator:
         if "dvfs_level" not in self.proposeds[0].columns:
             return
 
-        # Flatten all categorical states across all runs to calculate true total distribution
         baseline_states = np.concatenate([align_categorical_state(b, self.time_s) for b in self.baselines])
         proposed_states = np.concatenate([align_categorical_state(p, self.time_s) for p in self.proposeds])
 
@@ -1101,7 +1097,6 @@ class JournalComparator:
         )
 
         if "instructions_retired" in self.baselines[0].columns:
-            # We fetch the final cumulative value recorded in the run
             base_instructions = [float(b["instructions_retired"].iloc[-1]) for b in self.baselines]
             prop_instructions = [float(p["instructions_retired"].iloc[-1]) for p in self.proposeds]
             
@@ -1145,18 +1140,59 @@ class JournalComparator:
                 }
             )
 
+        if "memory_bandwidth" in self.baselines[0].columns:
+            # Integrate MB/s over time to get Total GB moved
+            base_gb = [trapezoid(b["memory_bandwidth"].to_numpy(), b["elapsed_s"].to_numpy()) / 1024.0 for b in self.baselines]
+            prop_gb = [trapezoid(p["memory_bandwidth"].to_numpy(), p["elapsed_s"].to_numpy()) / 1024.0 for p in self.proposeds]
+            
+            avg_base_gb = float(np.mean(base_gb))
+            avg_prop_gb = float(np.mean(prop_gb))
+            
+            rows.append(
+                {
+                    "Metric": "Total Memory Data Transferred",
+                    "Unit": "GB",
+                    BASELINE_LABEL: avg_base_gb,
+                    PROPOSED_LABEL: avg_prop_gb,
+                    "Baseline-referenced difference": avg_base_gb - avg_prop_gb,
+                    "Difference type": "Absolute Difference",
+                    "Change vs. baseline (%)": (
+                        100.0 * (avg_prop_gb - avg_base_gb) / avg_base_gb
+                        if avg_base_gb != 0 else float("nan")
+                    ),
+                }
+            )
+
         if "cpu_power" in self.baselines[0].columns and "cpu_power" in self.proposeds[0].columns:
-            # Integrate energy individually for each run, then average
             base_energies = [trapezoid(b["cpu_power"].to_numpy(), b["elapsed_s"].to_numpy()) for b in self.baselines]
             prop_energies = [trapezoid(p["cpu_power"].to_numpy(), p["elapsed_s"].to_numpy()) for p in self.proposeds]
             
             avg_base_energy = float(np.mean(base_energies))
             avg_prop_energy = float(np.mean(prop_energies))
+            
+            # Appending Instructions per Joule
+            if "instructions_retired" in self.baselines[0].columns:
+                base_ipj = avg_base_inst / avg_base_energy if avg_base_energy else float("nan")
+                prop_ipj = avg_prop_inst / avg_prop_energy if avg_prop_energy else float("nan")
+                rows.append(
+                    {
+                        "Metric": "Instructions per Joule (Efficiency)",
+                        "Unit": "Inst/J",
+                        BASELINE_LABEL: base_ipj,
+                        PROPOSED_LABEL: prop_ipj,
+                        "Baseline-referenced difference": base_ipj - prop_ipj,
+                        "Difference type": "Absolute Difference",
+                        "Change vs. baseline (%)": (
+                            100.0 * (prop_ipj - base_ipj) / base_ipj
+                            if base_ipj else float("nan")
+                        ),
+                    }
+                )
+
             energy_delta = avg_base_energy - avg_prop_energy
             energy_change = (
                 100.0 * (avg_prop_energy - avg_base_energy) / avg_base_energy
-                if avg_base_energy != 0.0
-                else float("nan")
+                if avg_base_energy != 0.0 else float("nan")
             )
 
             rows.append(
@@ -1177,8 +1213,7 @@ class JournalComparator:
             edp_delta = base_edp - prop_edp
             edp_change = (
                 100.0 * (prop_edp - base_edp) / base_edp
-                if base_edp != 0.0
-                else float("nan")
+                if base_edp != 0.0 else float("nan")
             )
 
             rows.append(
@@ -1190,6 +1225,27 @@ class JournalComparator:
                     "Baseline-referenced difference": edp_delta,
                     "Difference type": "Absolute Difference",
                     "Change vs. baseline (%)": edp_change,
+                }
+            )
+            
+            # Energy-Delay Squared (ED^2P) = EDP * Time
+            base_ed2p = base_edp * avg_base_time
+            prop_ed2p = prop_edp * avg_prop_time
+            ed2p_delta = base_ed2p - prop_ed2p
+            ed2p_change = (
+                100.0 * (prop_ed2p - base_ed2p) / base_ed2p
+                if base_ed2p != 0.0 else float("nan")
+            )
+
+            rows.append(
+                {
+                    "Metric": "Energy-Delay Squared (ED^2P)",
+                    "Unit": "J*s^2",
+                    BASELINE_LABEL: base_ed2p,
+                    PROPOSED_LABEL: prop_ed2p,
+                    "Baseline-referenced difference": ed2p_delta,
+                    "Difference type": "Absolute Difference",
+                    "Change vs. baseline (%)": ed2p_change,
                 }
             )
 

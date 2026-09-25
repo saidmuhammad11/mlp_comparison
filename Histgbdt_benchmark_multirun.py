@@ -41,7 +41,7 @@ STOP_REQUESTED = False
 def handle_ctrl_c(sig, frame):
     global STOP_REQUESTED
     STOP_REQUESTED = True
-    print("\n⚠️ Ctrl+C detected - requesting a clean shutdown...")
+    print("\n[WARNING] Ctrl+C detected - requesting a clean shutdown...")
 
 signal.signal(signal.SIGINT, handle_ctrl_c)
 
@@ -450,7 +450,7 @@ class HistGBDTModel:
 # ---------------------------------------------------------------------------
 class HistGBDTBenchmarkRunner:
     def __init__(self, model: HistGBDTModel, controller: str, pcm_path: str,
-                 pcm_power_path: str, output_dir: Path, sample_sleep_s: float = 3.0,
+                 pcm_power_path: str, output_dir: Path, sample_sleep_s: float = 0.5,
                  allow_simulated: bool = False, history_length: Optional[int] = None,
                  bw_ref_mb_s: float = DEFAULT_BW_REF_MB_S, show_workload_output: bool = True):
                  
@@ -508,7 +508,7 @@ class HistGBDTBenchmarkRunner:
             
         if previous is not None and previous != level:
             self.switch_count += 1
-            print(f"🔄 DVFS switch: {previous} -> {level} | powercfg {elapsed*1000.0:.2f} ms")
+            print(f"[SWITCH] DVFS switch: {previous} -> {level} | powercfg {elapsed*1000.0:.2f} ms")
             
         return True, elapsed
 
@@ -579,6 +579,14 @@ class HistGBDTBenchmarkRunner:
                 "cpu_frequency": cfreq,
                 "cpu_power": power,
             }
+        except subprocess.TimeoutExpired as e:
+            print(f"[WARNING] pcm.exe timed out (OS sleep detected?). Skipping frame.")
+            return self._simulate_pcm_data()
+        except ValueError as e:
+            if "timeout" in str(e).lower():
+                print(f"[WARNING] Negative timeout detected due to OS clock jump. Skipping frame.")
+                return self._simulate_pcm_data()
+            raise RuntimeError(f"PCM parsing failed: {e}")
         except Exception as e:
             if self.allow_simulated:
                 return self._simulate_pcm_data()
@@ -624,6 +632,14 @@ class HistGBDTBenchmarkRunner:
         l2_miss_rate = pcm["l2_cache_misses"] / total_l2 if total_l2 > 0 else 0.0
         l3_miss_rate = pcm["l3_cache_misses"] / total_l3 if total_l3 > 0 else 0.0
         
+        # --- NEW METRICS FOR EDP CALCULATION ---
+        freq_info = psutil.cpu_freq()
+        current_freq_mhz = freq_info.current if freq_info else 2000.0
+        logical_cores = psutil.cpu_count(logical=True)
+        
+        sample_cycles = current_freq_mhz * 1_000_000 * logical_cores
+        sample_instructions = sample_cycles * float(pcm["ipc"])
+        
         sample_perf = time.perf_counter()
         data = {
             "timestamp": datetime.now().isoformat(),
@@ -637,6 +653,8 @@ class HistGBDTBenchmarkRunner:
             "cpu_power": round(float(pcm.get("cpu_power", 0.0)), 3),
             "cpu_temperature": 0.0,
             "cpu_frequency": round(float(pcm.get("cpu_frequency", 0.0)), 3),
+            "cpu_cycles": float(sample_cycles),
+            "instructions_retired": float(sample_instructions),
         }
         
         data = self.feature_engineer(data)
@@ -732,7 +750,7 @@ class HistGBDTBenchmarkRunner:
         proc._benchmark_stderr_handle = stderr_f
         self.benchmark_process = proc
         self.workload_launch_count += 1
-        print(f"✅ Workload started (PID {proc.pid}, launch #{self.workload_launch_count}).")
+        print(f"[SUCCESS] Workload started (PID {proc.pid}, launch #{self.workload_launch_count}).")
         
         return proc, stdout_path, stderr_path
 
@@ -764,7 +782,7 @@ class HistGBDTBenchmarkRunner:
                     pass
 
     def start_realtime_plot(self):
-        print("📊 Starting real-time visualization...")
+        print("[PLOT] Starting real-time visualization...")
         fig, axs = plt.subplots(4, 2, figsize=(16, 12))
         fig.suptitle("HistGBDT-RPM Real-Time Monitoring", fontsize=14, fontweight='bold')
 
@@ -854,7 +872,7 @@ class HistGBDTBenchmarkRunner:
                         break
                     if duration_policy == "strict":
                         exit_reason = "benchmark_completed_before_duration"
-                        print("\n️ Workload completed before T_exp; stopping rather than monitoring idle time.")
+                        print("\n[WARNING] Workload completed before T_exp; stopping rather than monitoring idle time.")
                         break
                         
                 iteration += 1
@@ -863,6 +881,7 @@ class HistGBDTBenchmarkRunner:
                 log_f.write(json.dumps(sample) + "\n")
                 log_f.flush()
                 
+                # Print every 3rd sample to keep the console clean
                 if iteration % 3 == 1:
                     print(f"[{iteration:03d}] t={sample['elapsed_s']:7.2f}s | Level={sample['dvfs_level']:6s} | IPC={sample['ipc']:5.2f} | P={sample['cpu_power']:6.2f}W")
                     
@@ -880,7 +899,7 @@ class HistGBDTBenchmarkRunner:
         try:
             self.set_power_plan("Medium", force=True, record_experiment=False)
         except Exception as exc:
-            print(f"WARNING: could not restore Medium power plan: {exc}")
+            print(f"[WARNING] could not restore Medium power plan: {exc}")
             
         benchmark_end_perf = time.perf_counter()
         benchmark_end_wall = datetime.now()
@@ -898,10 +917,20 @@ class HistGBDTBenchmarkRunner:
             avg_freq = time_weighted_average(times, df["cpu_frequency"].to_numpy(dtype=float), benchmark_duration_s)
             avg_cpu = time_weighted_average(times, df["cpu_usage_overall"].to_numpy(dtype=float), benchmark_duration_s)
             state_counts = {str(k): int(v) for k, v in df["dvfs_level"].value_counts().to_dict().items()}
+            
+            # --- CALCULATE EDP FOR SUMMARY ---
+            total_instructions = df["instructions_retired"].iloc[-1] if "instructions_retired" in df.columns else 0.0
+            total_cycles = df["cpu_cycles"].iloc[-1] if "cpu_cycles" in df.columns else 0.0
+            edp = energy_j * benchmark_duration_s
+            ed2p = edp * benchmark_duration_s
         else:
             energy_j = 0.0
             avg_power = avg_ipc = avg_freq = avg_cpu = float("nan")
             state_counts = {}
+            total_instructions = 0.0
+            total_cycles = 0.0
+            edp = 0.0
+            ed2p = 0.0
             
         summary = {
             "experiment_timestamp": datetime.now().isoformat(),
@@ -921,6 +950,10 @@ class HistGBDTBenchmarkRunner:
             "avg_ipc": float(avg_ipc),
             "avg_cpu_frequency_mhz": float(avg_freq),
             "avg_cpu_usage_percent": float(avg_cpu),
+            "total_instructions_retired": float(total_instructions),
+            "total_cpu_cycles": float(total_cycles),
+            "edp_j_s": float(edp),
+            "ed2p_j_s2": float(ed2p),
             "power_plan_switches": int(self.switch_count),
             "state_decision_counts": state_counts,
         }
@@ -936,6 +969,7 @@ class HistGBDTBenchmarkRunner:
         print(f"Average package power: {summary['avg_cpu_power_w']:.3f} W")
         print(f"Average IPC:           {summary['avg_ipc']:.4f}")
         print(f"Power-plan switches:   {summary['power_plan_switches']}")
+        print(f"EDP (Joules*Seconds):  {summary['edp_j_s']:.3f}")
         print(f"Summary saved to:      {summary_path}")
         
         return summary
@@ -954,7 +988,7 @@ def parse_args():
     parser.add_argument("--run-mode", choices=["completion", "duration"], default=None, help="completion = one finite run; duration = fixed T_exp.")
     parser.add_argument("--duration", type=float, default=None, help="Experiment duration T_exp in seconds for duration mode.")
     parser.add_argument("--duration-policy", choices=["strict", "repeat"], default=None, help="In duration mode: strict stops if workload ends; repeat relaunches.")
-    parser.add_argument("--sample-sleep", type=float, default=3.0, help="Waiting interval T after each control cycle.")
+    parser.add_argument("--sample-sleep", type=float, default=0.5, help="Waiting interval T after each control cycle.")
     parser.add_argument("--initial-wait", type=float, default=None, help="Initial wait after workload launch.")
     parser.add_argument("--settle", type=float, default=0.0, help="Optional pre-launch Medium-plan settle time.")
     parser.add_argument("--history-length", type=int, default=None, help="Rolling history N.")
@@ -1090,12 +1124,12 @@ def main():
         model = HistGBDTModel(model_path=model_path, scaler_path=scaler_path,
                               enable_proba_hysteresis=args.proba_hysteresis, proba_margin=args.proba_margin)
     except Exception as e:
-        print(f"❌ FATAL: could not load model: {e}")
+        print(f"[ERROR] FATAL: could not load model: {e}")
         return
 
     # Disable live plot if running an automated batch to prevent pausing the loop
     if args.runs > 1 and args.live_plot:
-        print("\n⚠️  Disabling live plot for unattended multi-run batch execution.")
+        print("\n[WARNING] Disabling live plot for unattended multi-run batch execution.")
         args.live_plot = False
                           
     print(f"\nExperiment configuration")
@@ -1120,7 +1154,7 @@ def main():
             
         if args.runs > 1:
             print(f"\n{'='*72}")
-            print(f"🚀 STARTING BATCH RUN {run_idx} OF {args.runs}")
+            print(f"[START] STARTING BATCH RUN {run_idx} OF {args.runs}")
             print(f"{'='*72}")
 
         run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -1178,7 +1212,7 @@ def main():
             runner.run(**run_kwargs)
 
         if run_idx < args.runs and not STOP_REQUESTED:
-            print(f"\n⏳ Run {run_idx} complete. Waiting 5 seconds before starting next run...")
+            print(f"\n[WAIT] Run {run_idx} complete. Waiting 5 seconds before starting next run...")
             time.sleep(5)
 
 if __name__ == "__main__":
@@ -1187,5 +1221,5 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\nInterrupted by user.")
     except Exception as exc:
-        print(f"\nFATAL EXPERIMENT ERROR: {exc}", file=sys.stderr)
+        print(f"\n[ERROR] FATAL EXPERIMENT ERROR: {exc}", file=sys.stderr)
         raise

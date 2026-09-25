@@ -1,0 +1,27 @@
+{
+  "experiment_timestamp": "2026-09-25T06:59:05.194112",
+  "controller": "medium",
+  "workload": "C:\\Users\\saidm\\Desktop\\mlp_comparison\\workload_mem2_stream_huge.py",
+  "threads": 3,
+  "run_mode": "completion",
+  "requested_duration_s": null,
+  "duration_policy": null,
+  "benchmark_start": "2026-09-25T06:52:18.221647",
+  "benchmark_end": "2026-09-25T06:59:05.166643",
+  "benchmark_duration_s": 406.95707579999,
+  "exit_reason": "benchmark_completed",
+  "samples": 199,
+  "cpu_package_energy_j": 5223.529642737972,
+  "avg_cpu_power_w": 12.835578869023562,
+  "avg_ipc": 1.040013694977579,
+  "avg_cpu_frequency_mhz": 1.29,
+  "avg_cpu_usage_percent": 17.96116136791865,
+  "total_instructions_retired": 11919839999.999998,
+  "total_cpu_cycles": 10456000000.0,
+  "edp_j_s": 2125752.348763211,
+  "ed2p_j_s2": 865089959.7276368,
+  "power_plan_switches": 0,
+  "state_decision_counts": {
+    "Medium": 199
+  }
+}

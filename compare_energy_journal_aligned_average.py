@@ -30,19 +30,19 @@ import pandas as pd
 # ============================ CONFIGURATION ============================
 # Provide the list of JSON logs for all runs. The script will average them.
 BASELINE_FILES = [
-    './results/workload_mixed1_bursty_lu_low_run1_20260924_181126/monitoring.jsonl',
-    './results/workload_mixed1_bursty_lu_low_run2_20260924_181819/monitoring.jsonl',
-    './results/workload_mixed1_bursty_lu_low_run3_20260924_182509/monitoring.jsonl',
-    './results/workload_mixed1_bursty_lu_low_run4_20260924_183204/monitoring.jsonl',
-    './results/workload_mixed1_bursty_lu_low_run5_20260924_183855/monitoring.jsonl',
+    './results/workload_mixed2_bursty_mg_low_run1/monitoring.jsonl',
+    './results/workload_mixed2_bursty_mg_low_run2/monitoring.jsonl',
+    './results/workload_mixed2_bursty_mg_low_run3/monitoring.jsonl',
+    './results/workload_mixed2_bursty_mg_low_run4/monitoring.jsonl',
+    './results/workload_mixed2_bursty_mg_low_run5/monitoring.jsonl',
 ]
 
 PROPOSED_FILES = [
-    './results/workload_mixed1_bursty_lu_hgbdt_run1_20260924_092356/monitoring.jsonl',
-    './results/workload_mixed1_bursty_lu_hgbdt_run2_20260924_093003/monitoring.jsonl',
-    './results/workload_mixed1_bursty_lu_hgbdt_run3_20260924_093706/monitoring.jsonl',
-    './results/workload_mixed1_bursty_lu_hgbdt_run4_20260924_094405/monitoring.jsonl',
-    './results/workload_mixed1_bursty_lu_hgbdt_run5_20260924_095108/monitoring.jsonl',
+    './results/workload_mixed2_bursty_mg_hgbdt_run1/monitoring.jsonl',
+    './results/workload_mixed2_bursty_mg_hgbdt_run2/monitoring.jsonl',
+    './results/workload_mixed2_bursty_mg_hgbdt_run3/monitoring.jsonl',
+    './results/workload_mixed2_bursty_mg_hgbdt_run4/monitoring.jsonl',
+    './results/workload_mixed2_bursty_mg_hgbdt_run5/monitoring.jsonl',
 ]
 
 WORKLOAD_NAME = "Mixed workload"
@@ -1097,8 +1097,9 @@ class JournalComparator:
         )
 
         if "instructions_retired" in self.baselines[0].columns:
-            base_instructions = [float(b["instructions_retired"].iloc[-1]) for b in self.baselines]
-            prop_instructions = [float(p["instructions_retired"].iloc[-1]) for p in self.proposeds]
+            # Integrate instantaneous instructions/sec over elapsed time to get total instructions
+            base_instructions = [trapezoid(b["instructions_retired"].to_numpy(), b["elapsed_s"].to_numpy()) for b in self.baselines]
+            prop_instructions = [trapezoid(p["instructions_retired"].to_numpy(), p["elapsed_s"].to_numpy()) for p in self.proposeds]
             
             avg_base_inst = float(np.mean(base_instructions))
             avg_prop_inst = float(np.mean(prop_instructions))
@@ -1119,8 +1120,9 @@ class JournalComparator:
             )
 
         if "cpu_cycles" in self.baselines[0].columns:
-            base_cycles = [float(b["cpu_cycles"].iloc[-1]) for b in self.baselines]
-            prop_cycles = [float(p["cpu_cycles"].iloc[-1]) for p in self.proposeds]
+            # Integrate instantaneous cycles/sec over elapsed time to get total cycles
+            base_cycles = [trapezoid(b["cpu_cycles"].to_numpy(), b["elapsed_s"].to_numpy()) for b in self.baselines]
+            prop_cycles = [trapezoid(p["cpu_cycles"].to_numpy(), p["elapsed_s"].to_numpy()) for p in self.proposeds]
             
             avg_base_cycles = float(np.mean(base_cycles))
             avg_prop_cycles = float(np.mean(prop_cycles))

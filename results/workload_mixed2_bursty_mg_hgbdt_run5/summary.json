@@ -1,0 +1,29 @@
+{
+  "experiment_timestamp": "2026-09-27T20:14:43.377868",
+  "controller": "hgbdt",
+  "workload": "C:\\Users\\saidm\\Desktop\\mlp_comparison\\NPB3.0-omp-C\\workload_mixed2_bursty_mg.py",
+  "threads": 3,
+  "run_mode": "completion",
+  "requested_duration_s": null,
+  "duration_policy": null,
+  "benchmark_start": "2026-09-27T20:08:48.839020",
+  "benchmark_end": "2026-09-27T20:14:43.377868",
+  "benchmark_duration_s": 354.5468106000044,
+  "exit_reason": "benchmark_completed",
+  "samples": 142,
+  "cpu_package_energy_j": 4271.4077670887345,
+  "avg_cpu_power_w": 12.047514289749703,
+  "avg_ipc": 1.1094617776614086,
+  "avg_cpu_frequency_mhz": 1.5066797663531264,
+  "avg_cpu_usage_percent": 19.837769764652712,
+  "total_instructions_retired": 12376800000.0,
+  "total_cpu_cycles": 15280000000.0,
+  "edp_j_s": 1514414.0005933973,
+  "ed2p_j_s2": 536930653.8383821,
+  "power_plan_switches": 103,
+  "state_decision_counts": {
+    "Low": 81,
+    "High": 43,
+    "Medium": 18
+  }
+}

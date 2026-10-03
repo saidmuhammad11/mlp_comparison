@@ -30,24 +30,24 @@ import pandas as pd
 # ============================ CONFIGURATION ============================
 # Provide the list of JSON logs for all runs. The script will average them.
 BASELINE_FILES = [
-    './results/workload_mixed2_bursty_mg_low_run1/monitoring.jsonl',
-    './results/workload_mixed2_bursty_mg_low_run2/monitoring.jsonl',
-    './results/workload_mixed2_bursty_mg_low_run3/monitoring.jsonl',
-    './results/workload_mixed2_bursty_mg_low_run4/monitoring.jsonl',
-    './results/workload_mixed2_bursty_mg_low_run5/monitoring.jsonl',
+    './results/workload_cpu1_nas_ep_medium_run1/monitoring.jsonl',
+    './results/workload_cpu1_nas_ep_medium_run2/monitoring.jsonl',
+    './results/workload_cpu1_nas_ep_medium_run3/monitoring.jsonl',
+    './results/workload_cpu1_nas_ep_medium_run4/monitoring.jsonl',
+    './results/workload_cpu1_nas_ep_medium_run5/monitoring.jsonl',
 ]
 
 PROPOSED_FILES = [
-    './results/workload_mixed2_bursty_mg_hgbdt_run1/monitoring.jsonl',
-    './results/workload_mixed2_bursty_mg_hgbdt_run2/monitoring.jsonl',
-    './results/workload_mixed2_bursty_mg_hgbdt_run3/monitoring.jsonl',
-    './results/workload_mixed2_bursty_mg_hgbdt_run4/monitoring.jsonl',
-    './results/workload_mixed2_bursty_mg_hgbdt_run5/monitoring.jsonl',
+    './results/workload_cpu1_nas_ep_hgbdt_run1/monitoring.jsonl',
+    './results/workload_cpu1_nas_ep_hgbdt_run2/monitoring.jsonl',
+    './results/workload_cpu1_nas_ep_hgbdt_run3/monitoring.jsonl',
+    './results/workload_cpu1_nas_ep_hgbdt_run4/monitoring.jsonl',
+    './results/workload_cpu1_nas_ep_hgbdt_run5/monitoring.jsonl',
 ]
 
 WORKLOAD_NAME = "Mixed workload"
 
-BASELINE_LABEL = "Default Windows High"
+BASELINE_LABEL = "Default Windows low"
 PROPOSED_LABEL = "HistGBDT-RPM"
 
 OUTPUT_DIR = Path("journal_figures")

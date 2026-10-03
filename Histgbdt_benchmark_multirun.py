@@ -75,6 +75,8 @@ PCM_POWER_CANDIDATES = [
 
 CURATED_WORKLOADS = [
     "workload_mem2_stream_huge.py",
+    "workload_cpu1_nas_ep.py",                 
+    "workload_mem1_bursty_is.py",              
     "NPB3.0-omp-C/workload_cpu1_nas_ep.py",
     "NPB3.0-omp-C/workload_mem1_bursty_is.py",
     "NPB3.0-omp-C/workload_cpu2_bursty_ep.py",

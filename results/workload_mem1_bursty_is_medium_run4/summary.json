@@ -1,0 +1,27 @@
+{
+  "experiment_timestamp": "2026-10-01T08:45:45.965027",
+  "controller": "medium",
+  "workload": "C:\\Users\\saidm\\Desktop\\mlp_comparison\\workload_mem1_bursty_is.py",
+  "threads": 3,
+  "run_mode": "completion",
+  "requested_duration_s": null,
+  "duration_policy": null,
+  "benchmark_start": "2026-10-01T08:42:29.041544",
+  "benchmark_end": "2026-10-01T08:45:45.949050",
+  "benchmark_duration_s": 196.91359299997566,
+  "exit_reason": "benchmark_completed",
+  "samples": 96,
+  "cpu_package_energy_j": 2082.7462278895528,
+  "avg_cpu_power_w": 10.576955080443888,
+  "avg_ipc": 0.7952785703676236,
+  "avg_cpu_frequency_mhz": 1.2615708453428085,
+  "avg_cpu_usage_percent": 14.926844243299072,
+  "total_instructions_retired": 10769680000.0,
+  "total_cpu_cycles": 10456000000.0,
+  "edp_j_s": 410121.04304087796,
+  "ed2p_j_s2": 80758408.15007694,
+  "power_plan_switches": 0,
+  "state_decision_counts": {
+    "Medium": 96
+  }
+}

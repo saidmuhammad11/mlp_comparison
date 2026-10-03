@@ -4,9 +4,9 @@ import sys
 import os
 
 def run_nas_ep_fixed_workload():
-    # 1 run of EP Class A takes ~140 seconds on this hardware.
-    # 2 runs will mathematically guarantee ~280 seconds of fixed work.
-    ITERATIONS = 2
+    # 1 run of EP Class A takes ~136 seconds on this hardware.
+    # 3 runs will guarantee ~408 seconds (> 5 minutes) of fixed work.
+    ITERATIONS = 3
     
     # Updated path: OneDrive removed, pointing directly to the local Desktop
     exe_path = r"C:\Users\saidm\Desktop\Programming\Hardware_test\NPB3.0-omp-C\bin\ep.A.x"
@@ -24,11 +24,11 @@ def run_nas_ep_fixed_workload():
         
         try:
             # Suppress the heavy console output from the C program
+            # check=True MUST BE OMITTED because ep.A.x returns exit code 24
             subprocess.run(
                 [exe_path],
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=True
+                stderr=subprocess.DEVNULL
             )
         except Exception as e:
             print(f"ERROR during execution: {e}")

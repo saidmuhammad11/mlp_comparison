@@ -1,0 +1,20 @@
+{
+  "workload_name": "Mixed workload",
+  "baseline_files_processed": 5,
+  "proposed_files_processed": 5,
+  "baseline_label": "Default Windows High",
+  "proposed_label": "HistGBDT-RPM",
+  "analysis_duration_s": 497.75555,
+  "common_grid_step_s": 1.0,
+  "common_grid_points": 499,
+  "strict_duration_check": false,
+  "baseline_median_sampling_interval_s": 2.035096000000003,
+  "proposed_median_sampling_interval_s": 2.073921999999989,
+  "baseline_endpoint_tolerance_s": 3.0526440000000044,
+  "proposed_endpoint_tolerance_s": 3.1108829999999834,
+  "numeric_alignment": "linear interpolation to common fixed grid, averaged across N runs",
+  "categorical_alignment": "last observation carried forward, stacked across N runs",
+  "mean_definition": "trapezoidal integral divided by fixed duration",
+  "delta_definition": "baseline minus proposed on common grid",
+  "energy_definition": "trapezoidal integral of raw CPU power, averaged across runs"
+}

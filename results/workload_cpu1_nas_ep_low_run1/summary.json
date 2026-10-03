@@ -1,0 +1,27 @@
+{
+  "experiment_timestamp": "2026-10-01T05:23:55.667312",
+  "controller": "low",
+  "workload": "C:\\Users\\saidm\\Desktop\\mlp_comparison\\workload_cpu1_nas_ep.py",
+  "threads": 3,
+  "run_mode": "completion",
+  "requested_duration_s": null,
+  "duration_policy": null,
+  "benchmark_start": "2026-10-01T05:16:45.515686",
+  "benchmark_end": "2026-10-01T05:23:55.663330",
+  "benchmark_duration_s": 430.14859860000433,
+  "exit_reason": "benchmark_completed",
+  "samples": 162,
+  "cpu_package_energy_j": 3390.987238613617,
+  "avg_cpu_power_w": 7.8832925404155505,
+  "avg_ipc": 0.6939368247508066,
+  "avg_cpu_frequency_mhz": 0.6000000000000001,
+  "avg_cpu_usage_percent": 31.17500514494168,
+  "total_instructions_retired": 4148640000.0,
+  "total_cpu_cycles": 4824000000.0,
+  "edp_j_s": 1458628.4085601459,
+  "ed2p_j_s2": 627426965.8203013,
+  "power_plan_switches": 1,
+  "state_decision_counts": {
+    "Low": 162
+  }
+}
